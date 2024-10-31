@@ -3,6 +3,7 @@ package ipfs_api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	logging "github.com/ipfs/go-log"
 	"github.com/urchinfs/go-urchin2-sdk/utils"
@@ -249,7 +250,14 @@ func Pin(enabled bool) AddOpts {
 	}
 }
 
-func (h *HttpClient) Add(inputFile string, options ...AddOpts) (string, error) {
+func CenterId(centerId int) AddOpts {
+	return func(rb *RequestBuilder) error {
+		rb.Option("center-id", centerId)
+		return nil
+	}
+}
+
+func (h *HttpClient) Add(ctx context.Context, inputFile string, options ...AddOpts) (string, error) {
 	stat, err := os.Stat(inputFile)
 	if err != nil {
 		return "", err
@@ -274,7 +282,7 @@ func (h *HttpClient) Add(inputFile string, options ...AddOpts) (string, error) {
 		option(rb)
 	}
 
-	resp, err := rb.Body(fileReader).Send(context.Background())
+	resp, err := rb.Body(fileReader).Send(ctx)
 	if err != nil {
 		log.Errorf("send http err:%v", err)
 		return "", err
@@ -307,11 +315,11 @@ func (h *HttpClient) Add(inputFile string, options ...AddOpts) (string, error) {
 	return final, nil
 }
 
-func (h *HttpClient) AddNoPin(inputFile string) (string, error) {
-	return h.Add(inputFile, Pin(false))
+func (h *HttpClient) AddNoPin(ctx context.Context, inputFile string) (string, error) {
+	return h.Add(ctx, inputFile, Pin(false))
 }
 
-func (h *HttpClient) AddDir(dir string, options ...AddOpts) (string, error) {
+func (h *HttpClient) AddDir(ctx context.Context, dir string, options ...AddOpts) (string, error) {
 	stat, err := os.Stat(dir)
 	if err != nil {
 		return "", err
@@ -335,7 +343,7 @@ func (h *HttpClient) AddDir(dir string, options ...AddOpts) (string, error) {
 		option(rb)
 	}
 
-	resp, err := rb.Body(reader).Send(context.Background())
+	resp, err := rb.Body(reader).Send(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -365,4 +373,205 @@ func (h *HttpClient) AddDir(dir string, options ...AddOpts) (string, error) {
 	}
 
 	return final, nil
+}
+
+type CidQueryResult struct {
+	Hash     string
+	Centers  []int
+	ErrorMsg string
+}
+
+func (h *HttpClient) CidQuery(ctx context.Context, hash string) ([]int, error) {
+	var out CidQueryResult
+	err := h.Request("cid/query").
+		Arguments(hash).
+		Exec(ctx, &out)
+	if err != nil {
+		return nil, err
+	}
+
+	if out.ErrorMsg != "" {
+		log.Errorf("cid query error:%s", out.ErrorMsg)
+		return nil, utils.ErrBadResponse
+	}
+
+	return out.Centers, nil
+}
+
+type UrchinPeerInfo struct {
+	Id         string `json:"id"`
+	Hostname   string `json:"hostname"`
+	Gateway    string `json:"gateway"`
+	Api        string `json:"api"`
+	CenterId   int    `json:"center_id"`
+	CenterName string `json:"center_name"`
+	StoreName  string `json:"store_name"`
+	Endpoint   string `json:"endpoint"`
+	PayLoad    int    `json:"payLoad"`
+	CreateTime int    `json:"create_time"`
+}
+
+type peerRes struct {
+	PeerInfo UrchinPeerInfo
+	ErrorMsg string
+}
+
+type peerListRes struct {
+	Peers    []UrchinPeerInfo
+	ErrorMsg string
+}
+
+func (h *HttpClient) PeerSelf(ctx context.Context) (UrchinPeerInfo, error) {
+	var out peerRes
+	err := h.Request("peer/self").Exec(ctx, &out)
+	if err != nil {
+		return out.PeerInfo, err
+	}
+
+	if out.ErrorMsg != "" {
+		return UrchinPeerInfo{}, errors.New(out.ErrorMsg)
+	}
+	if out.PeerInfo.Id == "" {
+		return UrchinPeerInfo{}, utils.ErrNotReceiveRet
+	}
+
+	return out.PeerInfo, nil
+}
+
+func (h *HttpClient) PeerQuery(ctx context.Context, peerId string) (UrchinPeerInfo, error) {
+	var out peerRes
+	err := h.Request("peer/query").Option("id", peerId).Exec(ctx, &out)
+	if err != nil {
+		return UrchinPeerInfo{}, err
+	}
+
+	if out.ErrorMsg != "" {
+		return UrchinPeerInfo{}, errors.New(out.ErrorMsg)
+	}
+	if out.PeerInfo.Id == "" {
+		return UrchinPeerInfo{}, utils.ErrNotReceiveRet
+	}
+
+	return out.PeerInfo, nil
+}
+
+func (h *HttpClient) PeerAll(ctx context.Context) ([]UrchinPeerInfo, error) {
+	var out peerListRes
+	err := h.Request("peer/all").Option("ob", "obs").Exec(ctx, &out)
+	if err != nil {
+		return []UrchinPeerInfo{}, err
+	}
+
+	return out.Peers, nil
+}
+
+type cidExistRes struct {
+	Hash     string
+	CenterId uint
+	Exists   bool
+	ErrorMsg string
+}
+
+type cidStatusRes struct {
+	Hash     string
+	Status   string
+	ErrorMsg string
+}
+
+type cidTaskRes struct {
+	Hash     string
+	CenterId uint
+	ErrorMsg string
+}
+
+func (h *HttpClient) CidExistInCenter(ctx context.Context, cid string, centerId uint32) (bool, error) {
+	var out cidExistRes
+	err := h.Request("cid/existInCenter").
+		Arguments(cid).
+		Option("center_id", centerId).
+		Exec(ctx, &out)
+	if err != nil {
+		return false, err
+	}
+
+	if out.ErrorMsg != "" {
+		log.Errorf("cid existInCenter error:%s", out.ErrorMsg)
+		return false, utils.ErrBadResponse
+	}
+
+	return out.Exists, nil
+}
+
+func (h *HttpClient) CidSync(ctx context.Context, cid string, centerId uint32) error {
+	var out cidTaskRes
+	err := h.Request("cid/sync").
+		Arguments(cid).
+		Option("center_id", centerId).
+		Exec(ctx, &out)
+	if err != nil {
+		return err
+	}
+
+	if out.ErrorMsg != "" {
+		log.Errorf("cid sync error:%s", out.ErrorMsg)
+		return utils.ErrBadResponse
+	}
+
+	return nil
+}
+
+func (h *HttpClient) CheckSyncStatus(ctx context.Context, cid string, centerId uint32) (string, error) {
+	var out cidStatusRes
+	err := h.Request("cid/checkSyncStatus").
+		Arguments(cid).
+		Option("center_id", centerId).
+		Exec(ctx, &out)
+	if err != nil {
+		return "", err
+	}
+
+	if out.ErrorMsg != "" {
+		log.Errorf("cid sync error:%s", out.ErrorMsg)
+		return "", utils.ErrBadResponse
+	}
+
+	return out.Status, nil
+}
+
+func (h *HttpClient) CidMigrate(ctx context.Context, cid string, centerId uint32, datastorePath string) error {
+	var out cidTaskRes
+	err := h.Request("cid/migrate").
+		Arguments(cid).
+		Option("center_id", centerId).
+		Option("datastore_path", datastorePath).
+		Exec(ctx, &out)
+	if err != nil {
+		return err
+	}
+
+	if out.ErrorMsg != "" {
+		log.Errorf("cid sync error:%s", out.ErrorMsg)
+		return utils.ErrBadResponse
+	}
+
+	return nil
+}
+
+func (h *HttpClient) CheckMigrateStatus(ctx context.Context, cid string, centerId uint32, datastorePath string) (string, error) {
+	var out cidStatusRes
+	err := h.Request("cid/checkMigrateStatus").
+		Arguments(cid).
+		Option("center_id", centerId).
+		Option("datastore_path", datastorePath).
+		Exec(ctx, &out)
+	if err != nil {
+		return "", err
+	}
+
+	if out.ErrorMsg != "" {
+		log.Errorf("cid sync error:%s", out.ErrorMsg)
+		return "", utils.ErrBadResponse
+	}
+
+	return out.Status, nil
 }
