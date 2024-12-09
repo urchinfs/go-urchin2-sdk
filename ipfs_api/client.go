@@ -8,10 +8,12 @@ import (
 	logging "github.com/ipfs/go-log"
 	"github.com/urchinfs/go-urchin2-sdk/utils"
 	"io"
+	"io/fs"
 	"net"
 	gohttp "net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -31,12 +33,13 @@ var log = logging.Logger("api")
 type HttpClient struct {
 	url     string
 	httpCli gohttp.Client
+	token   string
 
 	versionMu sync.Mutex
 	version   *semver.Version
 }
 
-func NewClient(url string) *HttpClient {
+func NewClient(url string, token string) *HttpClient {
 	c := &gohttp.Client{
 		Transport: &gohttp.Transport{
 			Proxy:             gohttp.ProxyFromEnvironment,
@@ -50,6 +53,7 @@ func NewClient(url string) *HttpClient {
 	client.httpCli.CheckRedirect = func(_ *gohttp.Request, _ []*gohttp.Request) error {
 		return fmt.Errorf("unexpected redirect")
 	}
+	client.token = token
 
 	maddr, err := ma.NewMultiaddr(url)
 	if err != nil {
@@ -140,6 +144,7 @@ func (h *HttpClient) Request(command string, args ...string) *RequestBuilder {
 	return &RequestBuilder{
 		command: command,
 		args:    args,
+		headers: map[string]string{"Authorization": h.token},
 		client:  h,
 	}
 }
@@ -266,6 +271,10 @@ func (h *HttpClient) Add(ctx context.Context, inputFile string, options ...AddOp
 		return "", utils.ErrNotFile
 	}
 
+	if stat.Size() > utils.MaxFileSize {
+		return "", utils.ErrFileTooLarge
+	}
+
 	wrapDataDir, err := utils.WarpPath(inputFile)
 	if err != nil {
 		return "", err
@@ -326,6 +335,35 @@ func (h *HttpClient) AddDir(ctx context.Context, dir string, options ...AddOpts)
 	}
 	if !stat.IsDir() {
 		return "", utils.ErrNotDir
+	}
+
+	var totalSize int64
+	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			log.Errorf("Error walking path %s: %v", dir, err)
+			return err
+		}
+		if !d.IsDir() {
+			fStat, err := os.Stat(path)
+			if err != nil {
+				log.Errorf("Error statting file %s: %v", path, err)
+				return err
+			}
+			if fStat.Size() > utils.MaxFileSize {
+				return utils.ErrDirectoryTooLarge
+			}
+
+			totalSize += fStat.Size()
+			if totalSize > utils.MaxDirSize {
+				return utils.ErrDirectoryTooLarge
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		log.Errorf("Error walking path %s: %v", dir, err)
+		return "", err
 	}
 
 	wrapDataDir, err := utils.WarpPath(dir)

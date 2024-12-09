@@ -12,8 +12,8 @@ func example() {
 	utils.InitLog()
 
 	log.Infof("start...")
-	client := ipfs_api.NewClient("192.168.242.42:5001")
-	//client := ipfs_api.NewClient("127.0.0.1:5001")
+	client := ipfs_api.NewClient("192.168.242.42:5001", "7c091a3a412a500598d6fbdee24c82a6")
+	//client := ipfs_api.NewClient("127.0.0.1:5001", "7872d02fd823aaf15b674af623e214d5")
 	//inputFile := "init_model.7z"
 	//outputFile := "init_model.7z.car"
 
@@ -61,8 +61,8 @@ func example() {
 	//}
 	//log.Infof("File uploaded successfully. CID: %s", cid)
 
-	//cid, err := client.AddDir(context.Background(), "E:\\Exchange_dir\\tmp\\ipfs\\data\\code", ipfs_api.CenterId(2))
-	//cid, err := client.AddDir(context.Background(), "E:\\Exchange_dir\\tmp\\ipfs\\data\\code")
+	//cid, err := client.AddDir(context.Background(), "data/code", ipfs_api.CenterId(2))
+	//cid, err := client.AddDir(context.Background(), "data/code")
 	//if err != nil {
 	//	log.Fatal(err)
 	//}
@@ -85,7 +85,7 @@ func example() {
 	//	return
 	//}
 
-	//err := client.Get(context.Background(), "QmU8UBwwik6iCn99VWKquPEezU9zQrJowTctpaokjtYqDa", "/root/test/down")
+	//err := client.Get("QmU8UBwwik6iCn99VWKquPEezU9zQrJowTctpaokjtYqDa", "/root/test/down")
 	//if err != nil {
 	//	log.Fatal(err)
 	//	return
@@ -120,6 +120,7 @@ func example() {
 
 	peers, err := client.PeerAll(context.Background())
 	if err != nil {
+		log.Fatal(err)
 		return
 	}
 	log.Infof("peers:%v", peers)
