@@ -62,6 +62,10 @@ CidMigrate --- 该操作主要用于网络不通而触发迁移，类似现网�
 19. 异步查询迁移操作结果
 CheckMigrateStatus --- Failed或者Succeeded为最终状态
 
+20. 根据cid从peer节点遍历该cid对应的文件或文件夹
+List --- 遍历cid下的文件或者文件夹，返回子cid、文件或者文件夹名、文件大小、文件类型
+其中文件类型Type中，1为文件夹；2为文件；4为符号链接。
+
 ===============
 概述：
 1. 上传，可以 client.Add上传文件或者 client.AddDir文件夹，也可以对文件夹先car.PackCarFormat打包生成ipfs car文件，再client.DagImport导入
